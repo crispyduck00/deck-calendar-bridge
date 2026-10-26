@@ -1,0 +1,52 @@
+[
+  {
+    "id": "external-calendar",
+    "enabled": false,
+    "priority": 100,
+    "source": {
+      "type": "deck",
+      "boardIds": [
+        42
+      ],
+      "labelIds": [
+        17
+      ],
+      "match": "any"
+    },
+    "target": {
+      "mode": "fixed",
+      "principal": "principals/users/calendar-owner",
+      "calendarUri": "work"
+    },
+    "timing": {
+      "durationMinutes": 10,
+      "maxBlockMinutes": 240,
+      "dueAnchor": "before",
+      "dateOnly": "skip",
+      "dateTimeZone": "UTC"
+    },
+    "reminderMinutes": 5,
+    "invitations": {
+      "enabled": false,
+      "attendees": [
+        "work@example.invalid"
+      ],
+      "includeAssignees": false,
+      "descriptionPolicy": "link_only",
+      "allowFullDescription": false,
+      "notifyOnCategoryChanges": false
+    },
+    "sync": {
+      "direction": "bidirectional_times",
+      "onCalendarDelete": "remove_tag",
+      "onDone": "keep"
+    },
+    "presentation": {
+      "titlePrefixMode": "none",
+      "titlePrefix": "",
+      "titleSeparator": " - ",
+      "categories": [],
+      "syncDeckTags": false
+    }
+  }
+]

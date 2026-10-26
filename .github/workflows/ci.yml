@@ -1,0 +1,189 @@
+name: Relations engine and native NC35 integration
+on:
+  push:
+  pull_request:
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact: ${{ steps.version.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          python3 - <<'PYVERSION'
+          import os, re, xml.etree.ElementTree as E
+          version=E.parse('appinfo/info.xml').getroot().findtext('version')
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('version='+version+'\nartifact=deckcalendarbridge-nc35-'+version+'\n')
+          PYVERSION
+      - name: Check release metadata and documentation
+        run: python3 tests/check_release_metadata.py
+  windows_publication:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Actual Windows publication, preview and failure tests
+        shell: pwsh
+        env:
+          DCB_POWERSHELL: ${{ matrix.shell }}
+        run: python tests/publication_powershell.py
+  checks:
+    needs: metadata
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.3'
+            database: sqlite
+          - php: '8.4'
+            database: sqlite
+          - php: '8.4'
+            database: mysql
+            locking: redis
+    services:
+      redis:
+        image: ${{ matrix.locking == 'redis' && 'redis:7-alpine' || '' }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=10
+      mariadb:
+        image: ${{ matrix.database == 'mysql' && 'mariadb:10.11' || '' }}
+        env:
+          MARIADB_ROOT_PASSWORD: disposable-root-42
+          MARIADB_DATABASE: dcb_test
+          MARIADB_USER: dcb_test
+          MARIADB_PASSWORD: disposable-db-42
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: sqlite3, pdo_sqlite, pdo_mysql, redis, mbstring, xml, curl, zip, gd, intl, bcmath, bz2, gmp
+          coverage: none
+      - name: PHP and JavaScript syntax
+        run: |
+          find lib appinfo tests bin templates -name '*.php' -print0 | xargs -0 -n1 php -l
+          node --check js/admin.js
+          node tests/email-validation.cjs
+          python3 tests/check_release_metadata.py
+          python3 tests/maintenance_tools.py
+          python3 tools/check_public_tree.py
+          sh -n tools/create_public_copy.sh
+      - name: Pure formatting and rule tests
+        run: |
+          php tests/date-rule-modes.php
+          php tests/managed-category-policy.php
+          php tests/invitation-composer.php
+          php tests/title-prefix.php
+          php tests/vevent.php
+      - name: Install isolated NC35 and run real Deck, DAV and SMTP scenarios
+        env:
+          DCB_TEST_DATABASE: ${{ matrix.database }}
+          DCB_TEST_DB_PASSWORD: disposable-db-42
+          DCB_TEST_LOCKING: ${{ matrix.locking }}
+        run: sh tests/integration/setup.sh /tmp/dcb-native
+      - name: Deterministic reconciliation and interrupted-write scenarios
+        run: php tests/sync-runtime.php /tmp/dcb-native/nextcloud/3rdparty/autoload.php
+      - name: Actual www-data worker, concurrency, uninstall and reinstall
+        if: matrix.locking == 'redis'
+        run: |
+          dcb_source=$(mktemp -d /tmp/dcb-source.XXXXXX)
+          git archive HEAD | tar -x -C "$dcb_source"
+          sudo chown -R www-data:www-data /tmp/dcb-native "$dcb_source"
+          sudo -u www-data env HOME=/tmp/dcb-native/nextcloud DCB_PHP=/usr/bin/php DCB_TEST_LOCKING=redis DCB_EXPECT_USER=www-data python3 "$dcb_source/tests/integration/worker.py" /tmp/dcb-native/nextcloud
+          sudo -u www-data env HOME=/tmp/dcb-native/nextcloud DCB_PHP=/usr/bin/php DCB_TEST_LOCKING=redis DCB_EXPECT_USER=www-data python3 "$dcb_source/tests/integration/lifecycle.py" /tmp/dcb-native/nextcloud
+      - name: Validate packaged service syntax
+        run: |
+          systemd-analyze verify packaging/deckcalendarbridge-worker.service
+          python3 tests/render_worker.py
+          php bin/render-worker.php /tmp/dcb-native/nextcloud /usr/bin/php > /tmp/deckcalendarbridge-rendered.service
+          systemd-analyze verify /tmp/deckcalendarbridge-rendered.service
+      - name: Package exact tested commit
+        if: matrix.php == '8.4' && matrix.database == 'sqlite'
+        env:
+          DCB_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          mkdir -p build/deckcalendarbridge
+          cp -R appinfo lib config docs templates js css packaging bin build/deckcalendarbridge/
+          cp README.md LICENSE.md CHANGELOG.md CONTRIBUTING.md SECURITY.md AI_USAGE.md build/deckcalendarbridge/
+          git rev-parse HEAD > build/deckcalendarbridge/BUILD_COMMIT
+          (cd build && zip -q -r "../deckcalendarbridge-nc35-$DCB_VERSION.zip" deckcalendarbridge)
+          unzip -t "deckcalendarbridge-nc35-$DCB_VERSION.zip" | tail -1
+          sha256sum "deckcalendarbridge-nc35-$DCB_VERSION.zip" > "deckcalendarbridge-nc35-$DCB_VERSION.zip.sha256"
+          git archive --format=zip --prefix=deck-calendar-bridge/ HEAD > "deckcalendarbridge-source-$DCB_VERSION.zip"
+          sha256sum "deckcalendarbridge-source-$DCB_VERSION.zip" > "deckcalendarbridge-source-$DCB_VERSION.zip.sha256"
+          python3 - <<'PYSOURCE'
+          import os, subprocess, zipfile
+          version=os.environ['DCB_VERSION']
+          with zipfile.ZipFile('deckcalendarbridge-source-'+version+'.zip') as source:
+              assert source.testzip() is None
+              expected={'deck-calendar-bridge/'+p for p in subprocess.check_output(['git','ls-files','-z'],text=True).split('\0') if p}
+              actual={i.filename for i in source.infolist() if not i.is_dir()}
+              assert actual==expected
+              assert not any('/.git/' in p or '..' in p.split('/') for p in actual)
+          PYSOURCE
+      - uses: actions/upload-artifact@v4
+        if: matrix.php == '8.4' && matrix.database == 'sqlite'
+        with:
+          name: ${{ needs.metadata.outputs.artifact }}
+          path: |
+            deckcalendarbridge-nc35-${{ needs.metadata.outputs.version }}.zip
+            deckcalendarbridge-nc35-${{ needs.metadata.outputs.version }}.zip.sha256
+            deckcalendarbridge-source-${{ needs.metadata.outputs.version }}.zip
+            deckcalendarbridge-source-${{ needs.metadata.outputs.version }}.zip.sha256
+          if-no-files-found: error
+
+  release:
+    needs: [metadata, checks, windows_publication]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.metadata.outputs.artifact }}
+          path: dist
+      - name: Publish the verified version once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          dcb_version=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("appinfo/info.xml").getroot().findtext("version"))')
+          dcb_tag="v$dcb_version"
+          if gh release view "$dcb_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $dcb_tag already exists; leaving its assets and tag unchanged."
+            exit 0
+          fi
+          test "$(unzip -p "dist/deckcalendarbridge-nc35-$dcb_version.zip" deckcalendarbridge/BUILD_COMMIT)" = "$GITHUB_SHA"
+          export DCB_RELEASE_VERSION="$dcb_version"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          version=os.environ['DCB_RELEASE_VERSION']
+          content=Path('CHANGELOG.md').read_text().split('## '+version+'\n',1)[1].split('\n## ',1)[0].strip()
+          content+='\n\nSee the installation guide for environment checks, worker activation and upgrades. Event descriptions are managed; preserve needed calendar notes in Deck before migrating from older versions. Category notifications default to off.\n'
+          content+='\nSee the bundled English installation, configuration and uninstall documentation. The ZIP is the installable app package; BUILD_COMMIT records the exact tested source.\n'
+          Path('/tmp/dcb-release-notes.md').write_text(content)
+          PY
+          test "$(unzip -p "dist/deckcalendarbridge-source-$dcb_version.zip" deck-calendar-bridge/appinfo/info.xml | python3 -c 'import sys,xml.etree.ElementTree as E;print(E.fromstring(sys.stdin.read()).findtext("version"))')" = "$dcb_version"
+          gh release create "$dcb_tag" "dist/deckcalendarbridge-nc35-$dcb_version.zip" "dist/deckcalendarbridge-nc35-$dcb_version.zip.sha256" "dist/deckcalendarbridge-source-$dcb_version.zip" "dist/deckcalendarbridge-source-$dcb_version.zip.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Deck Calendar Bridge $dcb_version" --notes-file /tmp/dcb-release-notes.md

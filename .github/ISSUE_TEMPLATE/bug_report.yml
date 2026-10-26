@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible problem with a supported configuration.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, config.php, raw calendar/card contents or personal logs. Use private reporting for security vulnerabilities.
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and environment
+      description: App, Nextcloud, Deck, PHP CLI, database/locking backend, worker and cron setup.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and expected/actual behavior
+      description: Use a minimal disposable example with anonymized card/rule identities.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnosis
+    attributes:
+      label: Redacted diagnostics
+      description: Doctor checks, relation error codes and relevant sanitized log lines. Remove account/email/host identifiers.

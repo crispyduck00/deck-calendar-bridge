@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+  <id>deckcalendarbridge</id>
+  <name>Deck Calendar Bridge</name>
+  <summary>Bidirectional Deck/calendar relations</summary>
+  <description>Persistent administrator-delegated card/calendar relations. Bidirectional times, exact tag/event deletion, existing-card backfill and optional initial attendees. Managed link descriptions, optional category updates and native invitations to external calendars.</description>
+  <version>1.1.3</version>
+  <licence>AGPL-3.0-or-later</licence>
+  <author>Project contributors</author>
+  <namespace>DeckCalendarBridge</namespace>
+  <category>organization</category>
+  <category>office</category>
+  <bugs>https://github.com/crispyduck00/deck-calendar-bridge/issues</bugs>
+  <repository>https://github.com/crispyduck00/deck-calendar-bridge</repository>
+  <dependencies>
+    <nextcloud min-version="35" max-version="35"/>
+  </dependencies>
+  <background-jobs>
+    <job>OCA\DeckCalendarBridge\BackgroundJob\SyncScanJob</job>
+  </background-jobs>
+  <commands>
+    <command>OCA\DeckCalendarBridge\Command\Sync</command>
+    <command>OCA\DeckCalendarBridge\Command\RelationsStatus</command>
+    <command>OCA\DeckCalendarBridge\Command\Doctor</command>
+    <command>OCA\DeckCalendarBridge\Command\Uninstall</command>
+  </commands>
+  <repair-steps>
+    <install>
+      <step>OCA\DeckCalendarBridge\Migration\InitializeInstance</step>
+    </install>
+    <post-migration>
+      <step>OCA\DeckCalendarBridge\Migration\InitializeInstance</step>
+    </post-migration>
+  </repair-steps>
+  <settings>
+    <admin>OCA\DeckCalendarBridge\Settings\AdminSettings</admin>
+    <admin-section>OCA\DeckCalendarBridge\Settings\AdminSection</admin-section>
+  </settings>
+</info>
+

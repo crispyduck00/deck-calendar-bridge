@@ -1,0 +1,17 @@
+/vendor/
+/.phpunit.cache/
+/.idea/
+/.vscode/
+.DS_Store
+*.log
+/build/
+/dist/
+__pycache__/
+
+.venv/
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.p12

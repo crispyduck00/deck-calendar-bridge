@@ -1,0 +1,18 @@
+[Unit]
+Description=Nextcloud Deck Calendar Bridge worker
+After=network.target
+ConditionPathExists=/var/www/nextcloud/custom_apps/deckcalendarbridge/appinfo/info.xml
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/nextcloud
+Environment=HOME=/var/www/nextcloud
+ExecStart=/usr/bin/php /var/www/nextcloud/occ background-job:worker --interval=1 --stop_after=15m "OCA\\DeckCalendarBridge\\BackgroundJob\\ReconcileCardJob" "OCA\\DeckCalendarBridge\\BackgroundJob\\SyncScanJob"
+Restart=always
+RestartSec=2
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
